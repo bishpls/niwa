@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>niwa · garden sandbox</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; color: #ddd; font: 12px ui-monospace, Menlo, monospace; overflow: hidden; }
+  #out { display: block; }
+</style>
+</head>
+<body>
+<!-- niwa: a Japanese garden, a koi pond, cherry trees and a Noh stage, every part built in code (projects/niwa/README.md).
+     Sandbox: node engine/render.mjs projects/niwa --serve, open the printed URL.
+     Boards:
+       node engine/render.mjs projects/niwa --loop=cams~17.4 --stills=0,1,2,3,4,5,6,7     every bookmark at 17:24
+       node engine/render.mjs projects/niwa --loop=hours~hall --stills=6,9,12,17.4,18.3,20.5   one camera through the day
+       node engine/render.mjs projects/niwa --loop=shot~stage_front~17.4 --strip=0:2        motion at one camera
+       node engine/render.mjs projects/niwa --loop=debug~hall~17.4 --stills=0,1,2,3,4,5     the debug views
+       node engine/render.mjs projects/niwa --eval='INFO'                                    build stats -->
+<canvas id="out" width="16" height="16"></canvas>
+<script>
+  (() => {
+    const q = new URLSearchParams(location.search);
+    const [w, h] = (q.get('size') || '1920x1080').split('x').map(Number);
+    window.PROJECT = { fps: 24, plain: true, w, h, duration: 60 };
+  })();
+</script>
+<!-- the shared 3D engine (engine/scene3d): modules import 'scene3d/pipeline.js' etc. -->
+<script type="importmap">{ "imports": { "scene3d/": "../../engine/scene3d/" } }</script>
+<script src="../../engine/core.js"></script>
+<script src="../../engine/studio.js"></script>
+<script src="../../engine/vendor/three-vrm.js"></script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
