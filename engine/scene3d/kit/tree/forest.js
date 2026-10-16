@@ -12,7 +12,8 @@
 //     templates: [species.js template spec, ...] (each grown in nVariants seeds)
 //     trees: { n, x, y, z, yaw, s, tpl, v, seed } typed arrays (tpl indexes templates, v the variant)
 //     far: [d0, d1] the impostors' outer band (m)
-//   -> { meshes, measures, update(cam), near (the last frame's near list), templates, stats }
+//   -> { meshes, measures, update(cam), near (the last frame's near list), templates, stats, perchesOf(i, nCrown) (where a
+//        bird can stand on tree i: on its drawn limbs, with their wind) }
 import { rng, hash1, TAU } from '../../util.js';
 import { buildVariant } from './variant.js';
 import { bakeImpostor, impostorGeo } from './impostor.js';
@@ -385,6 +386,45 @@ export function makeForest(world, { templates, trees, far = [1500, 1900], name =
     }
     out.templates.push(T0);
   });
+  // ---- where a bird can stand on tree i, on the limbs L0 draws: its top (the highest node: a conifer's leader tip, a
+  // broadleaf's top twig, often metres off the axis) and a few near-level twigs in the outer upper crown, each in the
+  // world with its twig's wind (the bark's treeWind inputs: the weights times the scale, the phases plus the tree's
+  // own) so a bird rides what it holds. Not the box's top: that adds the cards' half-size margin for culling, and the
+  // cards face the eye, so no fixed height is the crown's drawn top.
+  //   perchesOf(i, nCrown) -> { top: { p, r, wind }, crown: [{ p, r, wind }, ...] }  (p: the feet, on top of the limb)
+  const perchNodes = new Map();
+  const nodesOf = (ti, vi) => {
+    const key = ti * 1000 + vi; if (perchNodes.has(key)) return perchNodes.get(key);
+    const VV = out.templates[ti].variants[vi], tr = VV.tr, S = tr.S, minR = (templates[ti].build || {}).l0MinR ?? 0.0015;
+    const drawn = new Uint8Array(S.n);
+    for (const ch of tr.chains || []) {
+      const dead = ch.nodes.length > 1 && (S.flag[ch.nodes[1]] & 128);           // (conifer.js DEAD: drawn as dead wood)
+      if (dead || S.r[ch.nodes[1] ?? ch.nodes[0]] >= minR) for (const j of ch.nodes) drawn[j] = 1;
+    }
+    let top = -1;
+    for (let j = 0; j < S.n; j++) if (drawn[j] && (top < 0 || S.y[j] > S.y[top])) top = j;
+    const cr = VV.V.crown, y0 = cr ? cr.base + (cr.top - cr.base) * 0.5 : S.y[top] * 0.6, rOut = cr ? cr.r * 0.5 : 0;
+    const crown = [];
+    for (let j = 0; j < S.n; j++) {
+      const p = S.par[j];
+      if (!drawn[j] || p < 0 || S.r[j] < 0.004 || S.r[j] > 0.03 || S.y[j] < y0 || Math.hypot(S.x[j], S.z[j]) < rOut) continue;
+      const dx = S.x[j] - S.x[p], dy = S.y[j] - S.y[p], dz = S.z[j] - S.z[p], dl = Math.hypot(dx, dy, dz);
+      if (dl > 1e-4 && Math.abs(dy / dl) < 0.57) crown.push(j);                   // (within 35 degrees of level)
+    }
+    const o = { top, crown }; perchNodes.set(key, o); return o;
+  };
+  out.perchesOf = (i, nCrown = 2) => {
+    const ti = trees.tpl[i], vi = trees.v[i], tr = out.templates[ti].variants[vi].tr, S = tr.S, wind = templates[ti].wind;
+    const c = Math.cos(trees.yaw[i]), s = Math.sin(trees.yaw[i]), sc = trees.s[i], ph0 = inst4[i * 4];
+    const at = j => {
+      const r = S.r[j] * sc, w = tr.W.at(j);
+      return { p: [c * sc * S.x[j] + s * sc * S.z[j] + trees.x[i], sc * S.y[j] + trees.y[i] + r, -s * sc * S.x[j] + c * sc * S.z[j] + trees.z[i]], r,
+        wind: wind ? { w: w[0].map(v => v * sc), ph: w[1].map(v => v + ph0), Wk: wind[0], Ws: wind[1], Wf: wind[2] } : null };
+    };
+    const N0 = nodesOf(ti, vi), crown = [];
+    for (let k = 0; k < Math.min(nCrown, N0.crown.length); k++) crown.push(at(N0.crown[Math.floor(hash1(Math.floor(trees.seed[i] * 7919) + 31 * k + 11) * N0.crown.length)]));
+    return { top: N0.top >= 0 ? at(N0.top) : null, crown };
+  };
   // ---- the canopy's sky, for the light where the world's fields aren't baked (?forest_sky=0 for A/Bs)
   if (q.get('forest_sky') !== '0' && N) {
     const c0 = performance.now();

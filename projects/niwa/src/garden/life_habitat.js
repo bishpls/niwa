@@ -6,7 +6,8 @@
 //                    because the roof itself is the obstacle, whoever built it. Trees are a raster of their own (small
 //                    birds go into a crown, big ones over it), plus B2's canopyAt when the forest is in.
 //   perches          tree branches (v1's garden trees: the grown skeleton's nodes, with their wind so a bird sways with
-//                    its twig), tree tops (B2's trees), roof ridges, eave corners and B3's perches, lantern tops, the
+//                    its twig), B2's trees' tops and outer twigs (on the limbs the forest draws, with their wind:
+//                    kit/tree/forest.js perchesOf), roof ridges, eave corners and B3's perches, lantern tops, the
 //                    walls' caps (found in the raster), stones
 //   feeding places   gravel, paved forecourt, moss, paddies (by zone), the pond's shallows (by depth), the blossom
 //                    (the cherries' flower clusters: petalSources)
@@ -146,7 +147,7 @@ export function buildHabitat(world, ctx) {
     H.trees.push({ species: tt.t.kind, at: tt.t.at, y0: tt.y0, h: tt.t.h, r: tt.t.r, S, W: tt.tr.W, wind, v1: true });
   }
   // B2's trees: at [x, y, z] (y the ground under it)
-  for (const ft of (forest && forest.trees) || []) { const at = ft.at.length === 3 ? [ft.at[0], ft.at[2]] : ft.at, y0 = ft.at.length === 3 ? ft.at[1] : heightAt(at[0], at[1]); H.trees.push({ species: ft.species, at, y0, h: ft.h, r: ft.r, v1: false }); }
+  for (const ft of (forest && forest.trees) || []) { const at = ft.at.length === 3 ? [ft.at[0], ft.at[2]] : ft.at, y0 = ft.at.length === 3 ? ft.at[1] : heightAt(at[0], at[1]); H.trees.push({ species: ft.species, at, y0, h: ft.h, r: ft.r, v1: false, fi: ft.i }); }
   if (!forest) {
     // B2's cedars until the forest is in: the approach's avenue and the pagoda's grove, from the plan
     stubs.push('trees: cedar stubs on the approach and round the pagoda (B2 trees not in)');
@@ -194,8 +195,14 @@ export function buildHabitat(world, ctx) {
           out: Math.hypot(S.x[i] - tt.at[0], S.z[i] - tt.at[1]) / Math.max(tt.r, 0.5),        // 0 at the trunk .. 1 at the crown's edge
         });
       }
+    } else if (tt.fi !== undefined && forest && forest.forest && forest.forest.perchesOf) {
+      // B2's trees, on the limbs the forest draws (kit/tree/forest.js perchesOf): the top (a crow's lookout: a cedar's
+      // leader tip, a broadleaf's top twig) and two near-level twigs in the outer upper crown, each with its wind
+      const pr = forest.forest.perchesOf(tt.fi, 2);
+      if (pr.top) H.perches.push({ kind: 'treetop', tree: ti, species: tt.species, p: pr.top.p, r: pr.top.r, wind: pr.top.wind });
+      for (const c of pr.crown) H.perches.push({ kind: 'crown', tree: ti, species: tt.species, p: c.p, r: c.r, wind: c.wind });
     } else {
-      // B2's trees: the leader (a crow's lookout on a cedar) and a few points round the crown's top third
+      // stub trees (no forest): the leader and a few points round the crown's top third, from the nominal size
       const y0 = tt.y0, top = y0 + tt.h;
       H.perches.push({ kind: 'treetop', tree: ti, species: tt.species, p: [tt.at[0], top, tt.at[1]], r: 0.03, stub: !!tt.stub });
       // and two places on the crown's side for small birds (in the outer foliage, its upper half)
@@ -255,6 +262,26 @@ export function buildHabitat(world, ctx) {
     ridge('kuri', P.KURI.at, P.KURI.y, P.KURI.w * 0.8, [1, 0], 11.0);
     ridge('kura', P.KURA.at, P.KURA.y, P.KURA.w * 0.8, [1, 0], 7.5);
     H.perches.push({ kind: 'ridge', name: 'pagoda', stub: true, p: [P.PAGODA2.at[0], P.PAGODA2.y + P.PAGODA2.h * 0.78, P.PAGODA2.at[1] + 0.4], r: 0.1 });
+  }
+  // every built perch onto what is drawn under a bird's feet (the highest point within 5 cm, from a 2 cm raster of the
+  // built world), or dropped when nothing drawn is within a metre of it: the declared points are formulas (a ridge's
+  // end plus a margin, an eave corner's tip) and the sutra house's sat 0.21 m inside its finial. One raster per 8 m tile.
+  {
+    const built = H.perches.filter(p => (p.kind === 'ridge' || p.kind === 'lantern' || p.kind === 'wall') && !p.stub), tiles = new Map();
+    for (const p of built) { const k = `${Math.floor(p.p[0] / 8)},${Math.floor(p.p[2] / 8)}`; (tiles.get(k) || tiles.set(k, []).get(k)).push(p); }
+    const drop = new Set(), moved = [];
+    for (const [k, ps] of tiles) {
+      const [i, j] = k.split(',').map(Number), ymax = Math.max(...ps.map(p => p.p[1])) + 12;
+      const R = renderTop(world, { x0: i * 8 - 0.2, x1: i * 8 + 8.2, z0: j * 8 - 0.2, z1: j * 8 + 8.2, res: 0.02, ymax, exclude: notSolid });
+      for (const p of ps) {
+        const y = rasterAt(R, p.p[0], p.p[2], 0.05);
+        if (y < -1e8 || Math.abs(y - p.p[1]) > 1) { drop.add(p); continue; }
+        moved.push(+(y - p.p[1]).toFixed(3)); p.p = [p.p[0], y, p.p[2]];
+      }
+    }
+    H.perches = H.perches.filter(p => !drop.has(p));
+    const a = moved.map(Math.abs).sort((x, y) => x - y);
+    H.builtSnap = { perches: built.length, tiles: tiles.size, dropped: drop.size, moved_median_m: a.length ? a[a.length >> 1] : 0, moved_max_m: a.length ? a[a.length - 1] : 0, moved };
   }
 
   lap('built perches');

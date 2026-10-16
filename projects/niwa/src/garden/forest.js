@@ -122,7 +122,7 @@ export function build(world, ctx) {
       const x = trees.x[i], z = trees.z[i];
       if (x < x0 || x > x1 || z < z0 || z > z1) continue;
       const tp = templates[trees.tpl[i]], V = F.templates[trees.tpl[i]].variants[trees.v[i]].V;
-      o.push({ species: tp.name, at: [x, trees.y[i], z], h: +(V.box.max.y * trees.s[i]).toFixed(2), r: +(Math.max(V.box.max.x, -V.box.min.x, V.box.max.z, -V.box.min.z) * trees.s[i]).toFixed(2) });
+      o.push({ species: tp.name, i, at: [x, trees.y[i], z], h: +(V.box.max.y * trees.s[i]).toFixed(2), r: +(Math.max(V.box.max.x, -V.box.min.x, V.box.max.z, -V.box.min.z) * trees.s[i]).toFixed(2) });
     }
     return o;
   };
