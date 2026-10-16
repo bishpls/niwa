@@ -627,16 +627,23 @@ export class Pipeline {
     return st;
   }
 
-  // every mesh drawn once in each pass into a tiny target, culling off: its buffers upload now (with the loading bar up)
-  // instead of in the frame that first sees it, where the upload and the GPU's pipeline state for its program made a
-  // hitch, and the CPU copies releaseArraysOnUpload marked are freed. Draws nothing visible. -> ms
+  // every mesh drawn once in each pass, culling off, into that pass's own target through a 1x1 viewport: its buffers
+  // upload and the GPU's pipeline for its program and that target's formats is built now (with the loading bar up),
+  // not in the frame that first sees it (zooming out to the valley hitched 200-380 ms). The first version drew into a
+  // 4x4 target of other formats, so the pipelines it built were never the frame's (15.6 s for nothing). -> ms
   uploadAll(camera) {
     const r = this.renderer, t0 = performance.now(), prev = r.getRenderTarget();
-    const rt = this._touchRT || (this._touchRT = new T.WebGLRenderTarget(4, 4, { type: T.HalfFloatType, depthBuffer: true }));
     const c = camera.clone(); c.layers.enableAll();
     const culled = this.meshes.filter(m => m.frustumCulled); culled.forEach(m => { m.frustumCulled = false; });
-    try { for (const pass of ['depth', 'gbuf', 'color']) { this._setPass(pass); r.setRenderTarget(rt); r.render(this.scene, c); } }
-    finally { culled.forEach(m => { m.frustumCulled = true; }); this._setPass('color'); r.setRenderTarget(prev); }
+    const passes = [['depth', this.RT_SHADOW2 || this.RT_SHADOW], ['gbuf', this.RT_G], ['color', this.RT_MAIN]];
+    try {
+      for (const [pass, rt] of passes) {
+        if (!rt) continue;
+        const vp = rt.viewport.clone(); rt.viewport.set(0, 0, 1, 1);
+        this._setPass(pass); r.setRenderTarget(rt); r.render(this.scene, c);
+        rt.viewport.copy(vp);
+      }
+    } finally { culled.forEach(m => { m.frustumCulled = true; }); this._setPass('color'); r.setRenderTarget(prev); }
     return Math.round(performance.now() - t0);
   }
 

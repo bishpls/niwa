@@ -200,6 +200,7 @@ async function build(opts, bar) {
     const c = sh.casters;
     pipe.setWorldShadows({ casters: c ? new T.Box3(new T.Vector3(c[0], c[1], c[2]), new T.Vector3(c[3], c[4], c[5])) : null, radii: sh.radii, sizes: sh.sizes });
   }
+  N.presentOpts = opts.present ? Object.assign({ title: opts.name }, opts.present) : null;    // (sandbox.js: the presentation card)
   N.pipe = pipe; N.world = world; N.CAMS = opts.cams || {}; N.assemblyOpts = opts.assembly || {}; N.wanderOpts = opts.wander || null;
   const solo = q.get('solo') ? new Set([...(opts.always || []), ...q.get('solo').split(',')]) : null;
   const ctx = Object.assign({ mods: {}, NIWA: N, SCENE: N, heightAt: null, ground: null }, opts.ctx || {});
@@ -209,7 +210,7 @@ async function build(opts, bar) {
   // ?post=k:v,... after the world's own setup, so the query wins over its look's defaults
   for (const kv of (q.get('post') || '').split(',').filter(Boolean)) { const [k, v] = kv.split(':'); pipe.post[k] = +v; }
   const todo = opts.modules.filter(([name]) => !(solo && !solo.has(name)) && !(!solo && (opts.optional || []).includes(name)));
-  if (bar) bar.plan([...todo.map(([n]) => 'module:' + n), 'fields', 'tools', 'shaders', 'first']);
+  if (bar) bar.plan([...todo.map(([n]) => 'module:' + n), 'fields', 'tools', 'shaders', 'upload', 'first']);
   for (const [name, load] of opts.modules) {
     if (solo && !solo.has(name)) continue;
     if (!solo && (opts.optional || []).includes(name)) continue;          // (built only when ?solo= names it: tests)
@@ -312,9 +313,10 @@ export async function host(opts) {
       try { await N.pipe.precompile(N.camera, (d, n) => bar && bar.part(d / Math.max(1, n), `Compiling shaders: ${d} of ${n}`), ids ? [['idMat', N.pipe.RT_ID]] : []); }
       catch (e) { console.warn('[precompile] ' + (e.stack || e)); }
     }
-    // ?upload=1: every mesh uploaded now, not in the frame that first sees it (pipeline.uploadAll; 15.6 s in niwa v2, off)
-    if (!RENDER && q.get('upload') === '1') {
-      if (bar) await bar.step('upload', 'Uploading the world to the GPU');
+    // the sandbox draws every mesh once now, into each pass's own target (pipeline.uploadAll: 2 s in niwa v2), so
+    // exploring doesn't hitch where a place is first seen; ?upload=0 skips it
+    if (!RENDER && q.get('upload') !== '0') {
+      if (bar) await bar.step('upload', 'Preparing the whole world for the GPU');
       try { N.pipe.uploaded_ms = N.pipe.uploadAll(N.camera); } catch (e) { console.warn('[upload] ' + (e.stack || e)); }
     }
 

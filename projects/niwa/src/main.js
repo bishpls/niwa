@@ -36,6 +36,8 @@ host({
   optional: LOOK_V1 ? [...V2_PENDING, ...V2_LANDED] : V2_PENDING, wander: { bounds: P.WORLD.walk },
   // v2's light (V2.md E2): the physical sky and the world's shadow cascades; ?look=v1 is v1's toon look under the palette sky
   sky: LOOK_V1 ? 'palette' : 'physical', atmosphere: { turbidity: 30, alt: 150 }, far: LOOK_V1 ? 9000 : 16000,
+  // the presentation card (sandbox.js: on by default on the hosted site): the reel's shots as the places
+  present: { title: 'niwa', subtitle: 'A mountain temple and its valley, built entirely in code' },
   fogBase: LOOK_V1 ? 0 : -66,                    // the morning mist pools on the valley floor (the road's level), not at the garden
   mistBox: LOOK_V1 ? undefined : [P.SITE.x0, P.SITE.z0, P.SITE.x1, P.SITE.z1],   // v1's dawn mist over the pond and moss stays inside the walls (B10: unbounded, it speckled the far land white)
   // near and mid maps at 2048 (B2's GPU timings: -10 ms of forest casting a frame; the focus map keeps 4 mm texels for close-ups)

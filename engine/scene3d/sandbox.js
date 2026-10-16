@@ -31,7 +31,7 @@ export async function start(N, { frame, placeCamera }) {
   canvas.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;display:block;cursor:grab';
   document.body.appendChild(canvas);
   const V0 = N.view || null;
-  const state = { t: V0 ? V0.t : 0, playing: !V0, speed: 1, hour: V0 ? V0.hour : (N.hour || 17.4), res: 1, lens: V0 ? V0.cam.lens : 28,
+  const state = { t: V0 ? V0.t : 0, playing: !V0, speed: 1, hour: V0 ? V0.hour : (N.hour || 17.4), res: [0.5, 0.75, 1].includes(+new URLSearchParams(location.search).get('res')) ? +new URLSearchParams(location.search).get('res') : 1, lens: V0 ? V0.cam.lens : 28,
     fog: V0 && V0.fog !== undefined ? V0.fog : 1, last: performance.now(), dragging: null, keys: new Set(),
     film: V0 && V0.film !== undefined && N.film ? V0.film : null, filmPlaying: false, filmSound: true, shot: '',
     track: V0 && V0.track ? Object.assign({}, V0.track) : null, trackRef: V0 && V0.track ? { t: V0.t, at: V0.cam.at.slice() } : null,
@@ -125,8 +125,18 @@ export async function start(N, { frame, placeCamera }) {
 
   // ---------------------------------------------------------------- the panel (panel.js)
   const HELP = 'drag orbit · right/shift-drag pan (holds the point) · wheel zooms at the cursor · WASD QE fly (holding speeds up) · space play · 1-9 bookmarks · [ ] hour · click pick · F focus · ⇧F track · T tape · P pin · L labels · V copy for agent · C copy camera · Esc clear';
-  const { P, flash, refresh, REFRESH, el, sec, row, slider, button, toggle, select } = makePanel({ id: 'nw', help: HELP });
-  const hhmm = h => `${String(Math.floor(h) % 24).padStart(2, '0')}:${String(Math.round((h % 1) * 60) % 60).padStart(2, '0')}`;
+  // presentation (for people who aren't building the world: a client, a visitor to the hosted page): a card with the
+  // world's places (the reel's shots, each at its own framing and hour; a click flies there) and its film with sound, and
+  // the full panel behind a settings button. On by default when the page gives opts.present and isn't served from this
+  // machine (the hosted bundle); ?present=1 or 0 overrides
+  const QS = new URLSearchParams(location.search);
+  const PRESENT = QS.get('present') === '1' || (QS.get('present') !== '0' && !!N.presentOpts && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname));
+  // presentation draws at 0.75 of the window unless ?res= says (niwa v2: 30 fps instead of 20 at rest, measured; the panel's
+  // resolution select changes it)
+  if (PRESENT && !QS.has('res')) state.res = 0.75;
+  const HELP_PRESENT = 'drag to look around · right-drag or shift-drag to move · scroll to zoom · WASD to fly (hold to speed up) · 1-9 the places · space plays the film';
+  const { P, flash, refresh, REFRESH, el, sec, row, slider, button, toggle, select } = makePanel({ id: 'nw', help: PRESENT ? HELP_PRESENT : HELP });
+  const hhmm = h => { const m = Math.round(h * 60); return `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };   // (minutes rounded first)
 
   // ---- time
   let s1 = sec('time', true);
@@ -208,6 +218,58 @@ export async function start(N, { frame, placeCamera }) {
     state.film = null; state.filmPlaying = false; filmSound();
     if (keep) { state.lens = Math.round(lensOf()); state.hour = N.hour; state.camName = 'film'; fromCam(); }
     refresh();
+  }
+
+  // ---- presentation: the places and the card (PRESENT above)
+  const places = N.film ? N.film.shots.map(s => {
+    const c = N.film.camAt(s, 1), h = N.film.lerpHour(s.hour, 1);
+    return { name: s.name.charAt(0).toUpperCase() + s.name.slice(1), cam: { pos: c.pos, at: c.at, lens: c.lens }, hour: h };
+  }) : [];
+  let tween = null;                                   // a fly to a place: camera and hour eased over FLY s
+  const FLY = 1.6;
+  function toPlace(pl) {
+    stopTrack('place');
+    if (state.film !== null) leaveFilm(false);
+    const f = new T.Vector3(); cam.getWorldDirection(f);
+    tween = { t0: performance.now(), from: { pos: cam.position.toArray(), at: cam.position.clone().addScaledVector(f, orbit.dist).toArray(), lens: lensOf(), hour: state.hour }, to: pl };
+    flash(pl.name, 2500);
+  }
+  function stepTween(now) {
+    if (!tween) return;
+    const u = Math.min(1, (now - tween.t0) / (FLY * 1000)), e = u * u * (3 - 2 * u), A = tween.from, B = tween.to;
+    const lerp = (a, b) => a.map((v, i) => v + (b[i] - v) * e);
+    const c = { pos: lerp(A.pos, B.cam.pos), at: lerp(A.at, B.cam.at), lens: A.lens + (B.cam.lens - A.lens) * e };
+    placeCamera(cam, c); state.lens = c.lens; state.hour = A.hour + (B.hour - A.hour) * e;
+    orbit.dist = new T.Vector3(...c.pos).distanceTo(new T.Vector3(...c.at)); fromCam(); orbit.target.set(...c.at);
+    interacting(); camDirty = true;
+    if (u >= 1) { tween = null; state.camName = B.name; refresh(); }
+  }
+  if (PRESENT) {
+    const po = N.presentOpts || {};
+    const card = document.createElement('div'); card.id = 'nwpresent';
+    card.style.cssText = 'position:fixed;left:14px;top:14px;width:270px;max-height:calc(100vh - 28px);overflow:auto;background:rgba(18,16,22,.86);color:#ece4d8;font:13px/1.45 -apple-system,system-ui,sans-serif;padding:14px 14px 10px;border-radius:10px;z-index:20';
+    const pbtn = 'display:block;width:100%;text-align:left;background:none;border:0;color:#e2d8c8;font:inherit;padding:4px 6px;border-radius:5px;cursor:pointer';
+    card.innerHTML = `<div style="font-size:17px;font-weight:600">${po.title || N.name || ''}</div>` +
+      (po.subtitle ? `<div style="color:#a99c8c;margin:2px 0 10px">${po.subtitle}</div>` : '<div style="height:8px"></div>') +
+      (N.film ? `<button id="nwp-film" style="${pbtn};background:#d9a46a;color:#1a140e;font-weight:600;text-align:center;padding:7px;margin-bottom:12px">▶ Play the film · ${Math.round(N.film.len / 60)} min, with sound</button>` : '') +
+      `<div style="color:#a99c8c;font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin:4px 0 4px">Places</div><div id="nwp-places"></div>` +
+      `<button id="nwp-settings" style="${pbtn};color:#a99c8c;margin-top:10px">⚙ Settings</button>`;
+    document.body.appendChild(card);
+    const list = card.querySelector('#nwp-places');
+    places.forEach((pl, i) => {
+      const b = document.createElement('button'); b.style.cssText = pbtn;
+      b.innerHTML = `<span style="color:#7d7266;display:inline-block;width:18px">${i < 9 ? i + 1 : ''}</span>${pl.name}<span style="float:right;color:#7d7266">${hhmm(pl.hour)}</span>`;
+      b.onmouseenter = () => { b.style.background = 'rgba(255,255,255,.07)'; }; b.onmouseleave = () => { b.style.background = 'none'; };
+      b.onclick = () => toPlace(pl); list.appendChild(b);
+    });
+    const fb = card.querySelector('#nwp-film');
+    if (fb) {
+      fb.onclick = () => { if (state.film === null) state.film = 0; state.filmPlaying = !state.filmPlaying; filmSound(); refresh(); };
+      REFRESH.push(() => { fb.textContent = state.filmPlaying ? '❚❚ Pause the film' : `▶ Play the film · ${Math.round(N.film.len / 60)} min, with sound`; });
+    }
+    P.style.display = 'none';
+    card.querySelector('#nwp-settings').onclick = () => { P.style.display = P.style.display === 'none' ? '' : 'none'; };
+    if (po.hour !== undefined) state.hour = po.hour;
   }
 
   // ---- look and post
@@ -667,7 +729,7 @@ export async function start(N, { frame, placeCamera }) {
     const k = e.key.toLowerCase(); state.keys.add(k);
     if (k === ' ') { if (state.film !== null) { state.filmPlaying = !state.filmPlaying; filmSound(); } else state.playing = !state.playing; e.preventDefault(); refresh(); }   // (with the film on, space plays the film)
     if (k === '[' || k === ']') { state.hour = Math.max(4.5, Math.min(23.5, state.hour + (k === ']' ? 1 : -1))); refresh(); }
-    if (/^[1-9]$/.test(k)) { const n = Object.keys(CAMS)[+k - 1]; if (n) goto(n); }
+    if (/^[1-9]$/.test(k)) { if (PRESENT && places.length) { const pl = places[+k - 1]; if (pl) toPlace(pl); } else { const n = Object.keys(CAMS)[+k - 1]; if (n) goto(n); } }
     if (k === 'escape') { if (state.track) { stopTrack('Esc'); return; } if (state.mode === 'pick' && !state.sel && state.drawing) setDrawing(null); setMode('pick'); setSel(null); }
     if (k === 't') setMode(state.mode === 'tape' ? 'pick' : 'tape');
     if (k === 'p') { if (state.sel && state.sel.point) addPin(state.sel); else setMode('pin'); }
@@ -747,6 +809,9 @@ export async function start(N, { frame, placeCamera }) {
   // ---------------------------------------------------------------- start
   N.sandbox = { state, filmAudio: () => filmAudio, filmSound, orbit, goto, copyView, loadView, click, setMode, setSel, addPin, flyTo, moved, spawnSpec, drawActors, refresh, focusSel, toggleTrack, stopTrack, actor: () => curActor, setBone: (b, v) => { curBone = b; curActor.setBone(b, v); drawActors(); } };
   resize();
+  // one frame at the moving size now (the loading bar is still up): its targets are allocated before the first drag
+  // rather than in it (a 117-133 ms hitch once, measured)
+  if (MOVE_RES < 1) try { movingRes = true; resize(); toCam(); frame(state.t, { hour: state.hour }); } catch (e) { console.warn('[sandbox] prewarm move', e); } finally { movingRes = false; resize(); }
   if (new URLSearchParams(location.search).get('plan') !== '0') renderPlan();         // ?plan=0: no plan (a faster start)
   if (V0) {
     placeView(cam, V0.cam); state.camName = V0.cam.name || 'view'; state.camMoved = !!V0.cam.moved;
@@ -780,6 +845,7 @@ export async function start(N, { frame, placeCamera }) {
       }
     }
     else if (state.playing) state.t += dt * state.speed;
+    stepTween(now);
     // fly
     const f = new T.Vector3(); cam.getWorldDirection(f); f.y = 0; f.normalize();
     // speed: 4 m/s near the ground up to 150 m/s high over it (half the camera's height a second), shift 3x, and the ramp

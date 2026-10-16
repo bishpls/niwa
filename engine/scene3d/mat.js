@@ -22,6 +22,17 @@ const T = window.THREE;
 // program misses the browser's and the OS's shader caches and compiles cold, as after a shader change or on a first visit
 const COLD = typeof location !== 'undefined' ? (new URLSearchParams(location.search).get('coldshaders') || '').replace(/[^0-9]/g, '') : '';
 export const PASSES = ['color', 'gbuf', 'depth', 'id', 'pig'];
+// A material whose surface can't remove a fragment (no discard, no alpha, no written depth, not transparent) draws the
+// same in the depth and id passes whatever its surface does: those two variants take one shared fragment source (a stub
+// surface, none of the material's varyings), so three compiles one program for all of them where the vertex code is
+// shared too (and the G-buffer's, under plainGbuf). niwa v2 compiled a depth and an id program for each material.
+// ?plaindepth=0: every material its own (A/Bs)
+const PLAIN = typeof location === 'undefined' || new URLSearchParams(location.search).get('plaindepth') !== '0';
+const plainSurface = spec => PLAIN && !spec.transparent && !/\bdiscard\b|sAlpha|gl_FragDepth/.test(spec.surface || '');
+// the G-buffer reads the surface's normal too: plain there as well when the surface never touches .N and never hands
+// the Surface on to a helper (which could)
+const plainGbuf = spec => plainSurface(spec) && !/\.N\b/.test(spec.surface || '') && !/[(,]\s*s\s*[,)]/.test((spec.surface || '').replace(/void\s+smain\s*\([^)]*\)/, ''));
+let FRAG_PLAIN = null;
 let NEXT_ID = 1;
 export const ID_NAMES = { 0: 'sky' };
 
@@ -196,7 +207,8 @@ export function material(spec, U) {
     const m = new T.ShaderMaterial({
       name: (spec.name || 'mat') + ':' + pass,
       uniforms, defines,
-      vertexShader: VERT(spec), fragmentShader: COLD ? FRAG(spec).replace('void main() {', `void main() {\n  if (gl_FragCoord.x < -${COLD}.0) discard;`) : FRAG(spec),
+      vertexShader: VERT(spec), fragmentShader: (fs => COLD ? fs.replace('void main() {', `void main() {\n  if (gl_FragCoord.x < -${COLD}.0) discard;`) : fs)(
+        ((pass === 'depth' || pass === 'id') && plainSurface(spec)) || (pass === 'gbuf' && plainGbuf(spec)) ? (FRAG_PLAIN || (FRAG_PLAIN = FRAG({ surface: 'void smain(inout Surface s, vec3 P, vec3 V) {}', varyings: '' }))) : FRAG(spec)),
       side: spec.double ? T.DoubleSide : (spec.side || T.FrontSide),
       transparent: pass === 'color' && !!spec.transparent,
       depthWrite: pass === 'color' && spec.depthWrite !== undefined ? spec.depthWrite : true,
