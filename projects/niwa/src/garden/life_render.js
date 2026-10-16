@@ -95,6 +95,8 @@ export function makeBirdRender(world, ctx, sim, L) {
     for (const l of lods) {
       l.mesh.userData.posAt = (t, i) => { const bb = birds[i === null || i === undefined ? 0 : i]; sampleTrack(bb, t, L, pz); return pz.p.slice(); };
       l.mesh.userData.sizeOf = () => [B.L, B.L * 0.4, B.span];
+      // whether bird k is out now (its species' hours, the same rank test the drawing uses): the sandbox won't track a roosting one
+      l.mesh.userData.activeAt = (t, i) => { const bb = birds[i === null || i === undefined ? 0 : i]; const N = ctx.NIWA; return bb.rank < activity(SPECIES[sp].hours, N && N.hourNow !== undefined ? N.hourNow : 12); };
     }
   }
 

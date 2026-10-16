@@ -143,6 +143,15 @@ export function makeInsects(world, ctx, H, L, opts = {}) {
     const geo = insectGeometry(I);
     const mesh = world.mesh(geo, insectMaterial(world, I, tex), { count: members.length, cast: k !== 'bee', frustum: false, loose: 'flying insects' });
     mesh.name = 'insect ' + k;
+    // where each one is at t and how big (world.js posAt, sizeOf): the sandbox's focus, track and pick boxes find it
+    mesh.userData.posAt = (t, i) => out.posOf(k, i === null || i === undefined ? 0 : i, t);
+    mesh.userData.sizeOf = () => [I.span, I.span * 0.5, I.span];
+    // whether instance i is out now (its kind's hours, the same test the drawing uses): the sandbox won't track an absent one
+    mesh.userData.activeAt = (t, i) => {
+      const spec = k === 'white' ? INSECTS.white : k === 'gifu' ? INSECTS.swallowtail : k === 'bee' ? INSECTS.bee : k === 'bat' ? opts.batRow : INSECTS.carpenter;
+      const hour = ctx.NIWA && ctx.NIWA.hourNow !== undefined ? ctx.NIWA.hourNow : 12;
+      return hash1((i || 0) * 977 + k.length * 31) < activity(spec.hours, hour);
+    };
     out.groups[k] = { members, mesh, tex, data, I, tris: geo.userData.tris };
   }
   const S = { mode: '', p: [0, 0, 0], v: [0, 0, 0] };

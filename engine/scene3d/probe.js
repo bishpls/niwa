@@ -611,8 +611,18 @@ export function trackMesh(N, tr) {
 }
 export function trackAt(N, tr, t) {
   const m = trackMesh(N, tr); if (!m) return null;
-  const n = tr.lag > 0 ? 8 : 1, c = [0, 0, 0], inst = tr.instance === undefined ? null : tr.instance;
-  for (let k = 0; k < n; k++) { const p = m.userData.posAt(t - (n > 1 ? tr.lag * k / (n - 1) : 0), inst); c[0] += p[0] / n; c[1] += p[1] / n; c[2] += p[2] / n; }
+  const inst = tr.instance === undefined ? null : tr.instance, U = m.userData, c = [0, 0, 0];
+  // the window: centred on t (a window behind it left a bird at flight speed 1-2 m off centre; tracks are functions of
+  // time, so the half after t is known), and no longer than 2.5 times the time the thing takes to cross its own length
+  // (a swallow's 0.4 s window spanned 4 m of a turn: ~0.08 s now; a koi's or a gliding heron's stays at lag)
+  let w = tr.lag;
+  if (w > 0 && U.sizeOf) {
+    const a = U.posAt(t - 0.05, inst), b = U.posAt(t + 0.05, inst), sz = Math.max(...U.sizeOf(inst));
+    const v = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 0.1;
+    if (v > 1e-3) w = Math.min(w, Math.max(0.06, 2.5 * sz / v));
+  }
+  const n = w > 0 ? 8 : 1;
+  for (let k = 0; k < n; k++) { const p = U.posAt(t + (n > 1 ? w * (0.5 - k / (n - 1)) : 0), inst); c[0] += p[0] / n; c[1] += p[1] / n; c[2] += p[2] / n; }
   return c;
 }
 // a view's camera at time t when it tracks: framed at s.t, it moves with the thing from there (at s.t: exactly s.cam)

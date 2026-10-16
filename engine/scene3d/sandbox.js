@@ -95,8 +95,11 @@ export async function start(N, { frame, placeCamera }) {
   const nowAt = s => trackAt(N, { tag: s.tag, actor: s.actor, instance: s.instance === undefined ? null : s.instance, lag: 0 }, state.t);
   function startTrack(s) {
     const tr = { tag: s.tag, instance: s.instance === undefined ? null : s.instance, actor: s.actor, style: state.trackStyle, lag: state.trackLag };
+    const tm = trackMesh(N, tr);
+    if (tm && tm.userData.activeAt && !tm.userData.activeAt(state.t, tr.instance)) { flash('that one is not out at this hour (try another, or another hour)'); return; }
     const p = trackAt(N, tr, state.t); if (!p) { flash('that does not move (nothing to track)'); return; }
     if (state.film !== null) leaveFilm();
+    if (tr.style !== 'tripod') flyTo(p, frameDist(sizeOfSel(s)));    // (orbit: start framed on it, filling FRAME_FILL)
     state.track = tr; state.trackRef = { t: state.t, at: p };
     drawTrack(); flash(`tracking ${trackName(tr)} (${tr.style}) · drag orbits, wheel zooms · a pan, flying or Esc stops`, 6000);
   }
@@ -156,6 +159,8 @@ export async function start(N, { frame, placeCamera }) {
   // ---- camera
   s1 = sec('camera', true);
   rw = row(s1);
+  // (the bookmarks scroll in their own box: niwa has ~90, which pushed the rest of the panel out of reach)
+  rw.style.cssText += ';max-height:150px;overflow-y:auto;align-content:flex-start';
   Object.keys(CAMS).forEach((n, i) => { const b = button(rw, (i < 9 ? i + 1 + ' ' : '') + n, () => goto(n), CAMS[n].note || ''); });
   slider(s1, 'lens mm', 12, 200, 1, () => state.lens, v => { state.lens = v; setLens(cam, v); state.camMoved = true; }, v => (+v).toFixed(0));
   // tracking: what is tracked, how (orbit: ride along; tripod: stay and turn), the smoothing, stop
@@ -268,7 +273,12 @@ export async function start(N, { frame, placeCamera }) {
       REFRESH.push(() => { fb.textContent = state.filmPlaying ? '❚❚ Pause the film' : `▶ Play the film · ${Math.round(N.film.len / 60)} min, with sound`; });
     }
     P.style.display = 'none';
-    card.querySelector('#nwp-settings').onclick = () => { P.style.display = P.style.display === 'none' ? '' : 'none'; };
+    // settings open beside the card, not under it (under it, only a 30 px strip of the panel could be reached)
+    card.querySelector('#nwp-settings').onclick = () => {
+      const show = P.style.display === 'none';
+      P.style.display = show ? '' : 'none';
+      if (show) P.style.left = Math.round(card.getBoundingClientRect().right + 10) + 'px';
+    };
     if (po.hour !== undefined) state.hour = po.hour;
   }
 
@@ -582,10 +592,23 @@ export async function start(N, { frame, placeCamera }) {
     info.style.display = 'block'; layoutCards();
   }
   // focus: fly to it (a moving thing: where it is now, not where it was picked)
+  // framing by size (Michael: tracked insects never showed, birds sat small and off centre): the distance at which a
+  // thing of size sz (m, its largest dimension) fills FRAME_FILL of the frame's height through the lens now, never
+  // nearer than six near planes
+  const FRAME_FILL = 0.3;
+  const frameDist = sz => Math.max(cam.near * 6, Math.min(NAV.maxDist, sz / (2 * Math.tan(cam.fov * Math.PI / 360)) / FRAME_FILL));
+  const sizeOfSel = s => {
+    const m = s && s.tag && isMoving(s) ? trackMesh(N, { tag: s.tag, actor: s.actor }) : null;
+    if (m && m.userData.sizeOf) { const z = m.userData.sizeOf(s.instance === undefined ? null : s.instance); if (z) return Math.max(...z); }
+    const b = s && s.bbox && s.bbox.size; return b ? Math.max(...b) : 2;
+  };
   function focusSel(s) {
     if (!s) return;
-    const p = isMoving(s) ? nowAt(s) : s.point; if (!p) return;
-    flyTo(p, Math.max(1.2, s.distance ? Math.min(s.distance, 4) : 3));
+    const moving = isMoving(s), p = moving ? nowAt(s) : s.point; if (!p) return;
+    if (moving) { const tm = trackMesh(N, { tag: s.tag, actor: s.actor }); if (tm && tm.userData.activeAt && !tm.userData.activeAt(state.t, s.instance)) { flash('that one is not out at this hour'); return; } }
+    // a moving thing framed by its size; a still one at the old 1.2-4 m, or nearer if it is small
+    const old = Math.max(1.2, s.distance ? Math.min(s.distance, 4) : 3);
+    flyTo(p, moving ? frameDist(sizeOfSel(s)) : Math.min(old, frameDist(sizeOfSel(s))));
   }
   function toggleTrack(s) { if (!s || !isMoving(s)) { flash('select something that moves to track it'); return; } if (tracking(s)) stopTrack(); else startTrack(s); }
   // the character a selected part belongs to: its own card (focus, track, hide the whole actor), its outline in blue
